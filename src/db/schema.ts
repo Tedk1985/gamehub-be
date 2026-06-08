@@ -18,10 +18,12 @@ export const gameEvents = pgTable('game_events', {
   level: integer('level'),
   durationMs: integer('duration_ms'),
   device: text('device'),
+  visitorId: text('visitor_id'),
   userId: integer('user_id').references(() => users.id, { onDelete: 'set null' }),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 }, (t) => [
   index('idx_game_events_game').on(t.game),
   index('idx_game_events_event').on(t.event),
   index('idx_game_events_created').on(t.createdAt),
+  index('idx_game_events_visitor').on(t.visitorId),
 ]);

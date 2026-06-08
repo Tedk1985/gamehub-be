@@ -23,6 +23,7 @@ async function migrate() {
         level INTEGER,
         duration_ms INTEGER,
         device TEXT,
+        visitor_id TEXT,
         user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
         created_at TIMESTAMP DEFAULT NOW() NOT NULL
       );
@@ -30,6 +31,12 @@ async function migrate() {
       CREATE INDEX IF NOT EXISTS idx_game_events_game ON game_events(game);
       CREATE INDEX IF NOT EXISTS idx_game_events_event ON game_events(event);
       CREATE INDEX IF NOT EXISTS idx_game_events_created ON game_events(created_at);
+      CREATE INDEX IF NOT EXISTS idx_game_events_visitor ON game_events(visitor_id);
+
+      DO $$ BEGIN
+        ALTER TABLE game_events ADD COLUMN visitor_id TEXT;
+      EXCEPTION WHEN duplicate_column THEN NULL;
+      END $$;
     `);
     console.log('Migrations complete.');
   } finally {

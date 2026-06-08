@@ -10,6 +10,7 @@ const eventSchema = z.object({
   level: z.number().int().positive().optional(),
   duration_ms: z.number().int().positive().optional(),
   device: z.string().max(20).optional(),
+  visitor_id: z.string().uuid().optional(),
 });
 
 export async function statsRoutes(app: FastifyInstance) {
@@ -23,6 +24,7 @@ export async function statsRoutes(app: FastifyInstance) {
       level: body.level ?? null,
       durationMs: body.duration_ms ?? null,
       device: body.device ?? null,
+      visitorId: body.visitor_id ?? null,
       userId: null,
     });
 
@@ -65,8 +67,8 @@ export async function statsRoutes(app: FastifyInstance) {
       ORDER BY game, level
     `);
 
-    const uniquePlayers = await pool.query<{ count: string }>(`
-      SELECT COUNT(DISTINCT user_id)::text as count FROM game_events
+    const uniqueVisitors = await pool.query<{ count: string }>(`
+      SELECT COUNT(DISTINCT visitor_id)::text as count FROM game_events WHERE visitor_id IS NOT NULL
     `);
 
     const deviceStats = await pool.query<{ device: string; count: string }>(`
@@ -76,12 +78,82 @@ export async function statsRoutes(app: FastifyInstance) {
       GROUP BY device
     `);
 
+    const visitors = await pool.query<{
+      visitor_id: string;
+      first_seen: string;
+      last_seen: string;
+      total_events: string;
+      games_played: string;
+      max_level: string | null;
+    }>(`
+      SELECT visitor_id,
+        MIN(created_at)::text as first_seen,
+        MAX(created_at)::text as last_seen,
+        COUNT(*)::text as total_events,
+        COUNT(DISTINCT game)::text as games_played,
+        MAX(level)::text as max_level
+      FROM game_events
+      WHERE visitor_id IS NOT NULL
+      GROUP BY visitor_id
+      ORDER BY last_seen DESC
+      LIMIT 50
+    `);
+
     return {
       totals: totals.rows,
       daily: daily.rows,
       levelProgress: levelProgress.rows,
-      uniquePlayers: uniquePlayers.rows[0]?.count ?? '0',
+      uniqueVisitors: uniqueVisitors.rows[0]?.count ?? '0',
       devices: deviceStats.rows,
+      visitors: visitors.rows,
+    };
+  });
+
+  // ── GET /api/stats/visitor/:id — individual visitor (admin only)
+  app.get('/api/stats/visitor/:id', { preHandler: requireAdmin }, async (req) => {
+    const { id } = req.params as { id: string };
+
+    const events = await pool.query<{
+      id: string;
+      game: string;
+      event: string;
+      level: string | null;
+      duration_ms: string | null;
+      device: string | null;
+      created_at: string;
+    }>(`
+      SELECT id, game, event, level::text, duration_ms::text, device, created_at::text
+      FROM game_events
+      WHERE visitor_id = $1
+      ORDER BY created_at ASC
+    `, [id]);
+
+    const summary = await pool.query<{
+      game: string;
+      total_events: string;
+      completes: string;
+      max_level: string | null;
+      avg_duration: string | null;
+    }>(`
+      SELECT game,
+        COUNT(*)::text as total_events,
+        SUM(CASE WHEN event = 'level_complete' THEN 1 ELSE 0 END)::text as completes,
+        MAX(level)::text as max_level,
+        ROUND(AVG(duration_ms))::text as avg_duration
+      FROM game_events
+      WHERE visitor_id = $1
+      GROUP BY game
+    `, [id]);
+
+    const firstSeen = await pool.query<{ ts: string }>(`
+      SELECT MIN(created_at)::text as ts FROM game_events WHERE visitor_id = $1
+    `, [id]);
+
+    return {
+      visitorId: id,
+      firstSeen: firstSeen.rows[0]?.ts ?? null,
+      summary: summary.rows,
+      events: events.rows,
     };
   });
 
