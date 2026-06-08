@@ -31,12 +31,13 @@ async function migrate() {
       CREATE INDEX IF NOT EXISTS idx_game_events_game ON game_events(game);
       CREATE INDEX IF NOT EXISTS idx_game_events_event ON game_events(event);
       CREATE INDEX IF NOT EXISTS idx_game_events_created ON game_events(created_at);
-      CREATE INDEX IF NOT EXISTS idx_game_events_visitor ON game_events(visitor_id);
 
       DO $$ BEGIN
         ALTER TABLE game_events ADD COLUMN visitor_id TEXT;
       EXCEPTION WHEN duplicate_column THEN NULL;
       END $$;
+
+      CREATE INDEX IF NOT EXISTS idx_game_events_visitor ON game_events(visitor_id);
     `);
     console.log('Migrations complete.');
   } finally {
