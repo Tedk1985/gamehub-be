@@ -32,7 +32,21 @@ export async function statsRoutes(app: FastifyInstance) {
   });
 
   // ── GET /api/stats/overview — dashboard data (admin only) ────
-  app.get('/api/stats/overview', { preHandler: requireAdmin }, async () => {
+  app.get('/api/stats/overview', { preHandler: requireAdmin }, async (req, reply) => {
+    reply.header('Cache-Control', 'no-store, no-cache, must-revalidate');
+    reply.header('Pragma', 'no-cache');
+
+    const { period } = req.query as { period?: string };
+
+    let dateFilter = '';
+    let params: string[] = [];
+    if (period === 'today') {
+      dateFilter = 'AND created_at >= CURRENT_DATE';
+    } else if (period === 'yesterday') {
+      dateFilter = 'AND created_at >= CURRENT_DATE - INTERVAL \'1 day\' AND created_at < CURRENT_DATE';
+    }
+    // period === 'all' or undefined → no filter
+
     const totals = await pool.query<{
       game: string;
       total_events: string;
@@ -48,6 +62,7 @@ export async function statsRoutes(app: FastifyInstance) {
         MAX(level)::text as max_level,
         ROUND(AVG(duration_ms))::text as avg_duration
       FROM game_events
+      WHERE 1=1 ${dateFilter}
       GROUP BY game
     `);
 
@@ -62,19 +77,21 @@ export async function statsRoutes(app: FastifyInstance) {
     const levelProgress = await pool.query<{ game: string; level: string; attempts: string }>(`
       SELECT game, level::text, COUNT(*)::text as attempts
       FROM game_events
-      WHERE event = 'level_complete'
+      WHERE event = 'level_complete' ${dateFilter}
       GROUP BY game, level
       ORDER BY game, level
     `);
 
     const uniqueVisitors = await pool.query<{ count: string }>(`
-      SELECT COUNT(DISTINCT visitor_id)::text as count FROM game_events WHERE visitor_id IS NOT NULL
+      SELECT COUNT(DISTINCT visitor_id)::text as count
+      FROM game_events
+      WHERE visitor_id IS NOT NULL ${dateFilter}
     `);
 
     const deviceStats = await pool.query<{ device: string; count: string }>(`
       SELECT device, COUNT(*)::text as count
       FROM game_events
-      WHERE device IS NOT NULL
+      WHERE device IS NOT NULL ${dateFilter}
       GROUP BY device
     `);
 
@@ -93,7 +110,7 @@ export async function statsRoutes(app: FastifyInstance) {
         COUNT(DISTINCT game)::text as games_played,
         MAX(level)::text as max_level
       FROM game_events
-      WHERE visitor_id IS NOT NULL
+      WHERE visitor_id IS NOT NULL ${dateFilter}
       GROUP BY visitor_id
       ORDER BY last_seen DESC
       LIMIT 50
